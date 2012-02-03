@@ -2,7 +2,7 @@ Automated deploy for a Kafka cluster on AWS. Can be used with [Storm](https://gi
 
 The deploy configures both Zookeeper and Kafka. Requires [leiningen](https://github.com/technomancy/leiningen) to run.
 
-Usage:
+## Usage
 
 
 Start a cluster:
