@@ -1,6 +1,6 @@
 Automated deploy for a Kafka cluster on AWS. Can be used with [Storm](https://github.com/nathanmarz/storm) or standalone. 
 
-The deploy configures both Zookeeper and Kafka.
+The deploy provisions and configures both Zookeeper and Kafka.
 
 ## Usage
 
