@@ -1,24 +1,32 @@
-(ns backtype.storm.provision
-  (:import [java.io File])
-  (:use 
-        [backtype.storm security]
-        [org.jclouds.compute :only [nodes-with-tag]]
-        [backtype.storm.util :only [with-var-roots]]
-        )
-  (:require [backtype.storm.node :as node])
-  (:require [backtype.storm.crate.storm :as storm])
-  (:require [kafka.deploy.deploy-util :as util])
-  )
-
 (ns kafka.deploy.provision
-  (:use [pallet compute configure core]
-        [clojure.contrib command-line])
+  (:use [pallet compute configure core resource]
+        [clojure.contrib command-line]
+        [kafka.deploy security]
+        [org.jclouds.compute :only [nodes-with-tag]])
   (:require [kafka.deploy.crate [zookeeper :as zookeeper]]
             [pallet.crate.java :as java]
             [pallet.crate.automated-admin-user :as automated-admin-user]
             [kafka.deploy.deploy-util :as util]
             [org.jclouds.compute :only [nodes-with-tag]]
+            [pallet.resource.remote-file :as remote-file]
+            [pallet.resource.exec-script :as exec-script]
             ))
+  
+(defn my-region []
+  (-> (pallet-config) :services :default :jclouds.regions)
+  )
+
+(defn jclouds-group [& group-pieces]
+  (str "jclouds#"
+       (apply str group-pieces)
+       "#"
+       (my-region)
+       ))  
+  
+(defn zookeeper-ips [compute name]
+  (let [running-nodes (filter running?
+                              (nodes-with-tag (str "kafka-zookeeper-" name) compute))]
+    (map primary-ip running-nodes)))  
   
 (def *USER* nil)
 
@@ -42,12 +50,28 @@
                         (zookeeper/init))
                         }))
 
+(def RELEASE-URL "http://people.apache.org/~nehanarkhede/kafka-0.7.0-incubating/kafka-0.7.0-incubating-src.tar.gz")
+
+(defn download-release [request]
+  (-> request
+    (remote-file/remote-file
+       "$HOME/kafka.tar.gz"
+       :url RELEASE-URL
+       :no-versioning true)
+    ))
+
 (defn kafka-server-spec []
   (server-spec
    :extends (base-server-spec)
    :phases {:configure (phase
-                         
-                         )
+                         (download-release)
+                         (exec-script/exec-checked-script
+                           "build kafka"
+                           (cd "$HOME")
+                           (tar "-xzf kafka.tar.gz")
+                           (cd "kafka-0.7.0-incubating-src")
+                           (sh "sbt update")
+                           (sh "sbt package")))
             :post-configure (phase
                               )
             :exec (phase
@@ -65,7 +89,7 @@
 
 (defn kafka [name]
   (group-spec
-    (str "kafka-zookeeper-" name)
+    (str "kafka-" name)
     :node-spec (node-spec
                   :image {:inbound-ports [2181 22]
                           :image-id "us-east-1/ami-08f40561"
@@ -95,15 +119,15 @@
          (print-ips-for-tag! aws tag))))
 
 (defn start! [aws name kn zn]
-  (println "Starting cluster with release" release)
-    (println (format "Provisioning nodes [zn=%d, kn=%d]" zn kn))
-    (converge! name aws kn zn)
-    (authorize-group aws (my-region) (jclouds-group "kafka-" name) (jclouds-group "kafka-zookeeper-" name))
-    (authorize-group aws (my-region) (jclouds-group "kafka-zookeeper-" name) (jclouds-group "kafka-" name))
+  (println "Starting cluster")
+  (println (format "Provisioning nodes [zn=%d, kn=%d]" zn kn))
+  (converge! name aws kn zn)
+  (authorize-group aws (my-region) (jclouds-group "kafka-" name) (jclouds-group "kafka-zookeeper-" name))
+  (authorize-group aws (my-region) (jclouds-group "kafka-zookeeper-" name) (jclouds-group "kafka-" name))
 
-    (lift (kafka name) :compute aws :phase [:post-configure :exec])
-    (println "Provisioning Complete.")
-    (print-all-ips! aws name)))
+  ;;(lift (kafka name) :compute aws :phase [:post-configure :exec])
+  (println "Provisioning Complete.")
+  (print-all-ips! aws name))
 
 (defn stop! [aws name]
   (println "Shutting Down nodes...")
@@ -128,10 +152,12 @@
         [[start? "Start Cluster?"]
          [stop? "Shutdown Cluster?"]
          [ips? "Print Cluster IP Addresses?"]
-         [name "Cluster name" "dev"]]
+         [name "Cluster name" "dev"]
+         [kn "Number of Kafka nodes" "1"]
+         [zn "Number of Zookeeper nodes" "1"]]
 
         (cond 
          stop? (stop! aws name)
-         start? (start! aws name)
+         start? (start! aws name (Integer/parseInt kn) (Integer/parseInt zn))
          ips? (print-all-ips! aws name)
          :else (println "Must pass --start or --stop or --ips"))))))
