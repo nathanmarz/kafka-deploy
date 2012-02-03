@@ -1,9 +1,12 @@
 Automated deploy for a Kafka cluster on AWS. Can be used with [Storm](https://github.com/nathanmarz/storm) or standalone. 
 
-The deploy configures both Zookeeper and Kafka. Requires [leiningen](https://github.com/technomancy/leiningen) to run.
+The deploy configures both Zookeeper and Kafka.
 
 ## Usage
 
+Install [leiningen](https://github.com/technomancy/leiningen).
+
+Set up your `~/.pallet/config.clj` as described [here](https://github.com/nathanmarz/storm-deploy/wiki)
 
 Start a cluster:
 
