@@ -4,9 +4,19 @@ The deploy configures both Zookeeper and Kafka. Requires [leiningen](https://git
 
 Usage:
 
+
+Start a cluster:
+
 ```
 lein deps
 lein run :deploy --start --name mykafkacluster --kn 8 --zn 2
 ```
 
 This creates a cluster called "mykafkacluster" with 8 kafka nodes and 2 zookeeper nodes.
+
+
+Stop a cluster:
+
+```
+lein run :deploy --stop --name mykafkacluster
+```
