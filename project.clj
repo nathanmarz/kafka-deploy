@@ -1,7 +1,7 @@
 (defproject kafka-deploy "0.0.1-SNAPSHOT"
   :source-path "src/clj"
   :test-path "test/clj"
-  :dev-resources-path "conf"
+  :resources-path "src/resource"
   :run-aliases {:deploy kafka.deploy.provision}
 
   :repositories {

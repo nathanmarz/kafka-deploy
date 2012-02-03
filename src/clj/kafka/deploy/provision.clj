@@ -10,7 +10,17 @@
             [org.jclouds.compute :only [nodes-with-tag]]
             [pallet.resource.remote-file :as remote-file]
             [pallet.resource.exec-script :as exec-script]
+            [pallet.resource.package :as package]
+            [clojure.contrib [str-utils2 :as str]]
+            [pallet [session :as session]]
             ))
+  
+(defn target-node-index
+  "Returns the target node's index within its group. For a group of size 3, returns either 0, 1 or 2."
+  [request]
+  (let [nodes (sort-by private-ip (session/nodes-in-group request))
+        node->idx (zipmap nodes (iterate inc 0))]
+    (node->idx (session/target-node request))))  
   
 (defn my-region []
   (-> (pallet-config) :services :default :jclouds.regions)
@@ -26,7 +36,7 @@
 (defn zookeeper-ips [compute name]
   (let [running-nodes (filter running?
                               (nodes-with-tag (str "kafka-zookeeper-" name) compute))]
-    (map primary-ip running-nodes)))  
+    (map private-ip running-nodes)))  
   
 (def *USER* nil)
 
@@ -60,21 +70,51 @@
        :no-versioning true)
     ))
 
-(defn kafka-server-spec []
+(defn mk-zk-str [compute name]
+  (->> (zookeeper-ips compute name)
+       (map #(str % ":2181"))
+       (str/join ",")
+       ))
+
+(defn kafka-server-spec [name]
   (server-spec
    :extends (base-server-spec)
    :phases {:configure (phase
+                         (package/package "daemontools")
                          (download-release)
                          (exec-script/exec-checked-script
                            "build kafka"
                            (cd "$HOME")
                            (tar "-xzf kafka.tar.gz")
-                           (cd "kafka-0.7.0-incubating-src")
+                           (mv "kafka-0.7.0-incubating-src" "kafka")
+                           (cd "kafka")
                            (sh "sbt update")
-                           (sh "sbt package")))
-            :post-configure (phase
-                              )
+                           (sh "sbt package")
+                           (mkdir "logs")))
+            :post-configure
+            (fn [request]
+              (-> request
+                (remote-file/remote-file "$HOME/kafka/config/server.properties"
+                             :template "server.properties"
+                             :values {'zk-str (mk-zk-str (:compute request) name)
+                                      'id (target-node-index request)}
+                             :owner (:username *USER*))
+                (remote-file/remote-file "$HOME/kafka/config/log4j.properties"
+                             :template "log4j.properties"
+                             :owner (:username *USER*))
+                (remote-file/remote-file
+                   "$HOME/kafka/run"
+                   :content (str
+                             "#!/bin/bash\n\n
+                          sh bin/kafka-server-start.sh config/server.properties")
+                   :overwrite-changes true
+                   :literal true
+                   :mode 755)
+                ))
             :exec (phase
+                    (exec-script/exec-script
+                           (cd "$HOME/kafka")
+                           "nohup supervise . &")
                     )}))
 
 (defn zookeeper [name]
@@ -95,7 +135,7 @@
                           :image-id "us-east-1/ami-08f40561"
                           :hardware-id "m1.large"
                           })
-    :extends (kafka-server-spec)))
+    :extends (kafka-server-spec name)))
 
 (defn converge! [name aws kn zn]
   (converge {(kafka name) kn
@@ -125,7 +165,7 @@
   (authorize-group aws (my-region) (jclouds-group "kafka-" name) (jclouds-group "kafka-zookeeper-" name))
   (authorize-group aws (my-region) (jclouds-group "kafka-zookeeper-" name) (jclouds-group "kafka-" name))
 
-  ;;(lift (kafka name) :compute aws :phase [:post-configure :exec])
+  (lift (kafka name) :compute aws :phase [:post-configure :exec])
   (println "Provisioning Complete.")
   (print-all-ips! aws name))
 
