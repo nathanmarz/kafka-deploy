@@ -49,15 +49,22 @@
             :configure (phase
                         (java/java :sun :jdk))}))
 
+(def ZK-VERSION "3.3.4")
+
 (defn zookeeper-server-spec []
   (server-spec
    :extends (base-server-spec)
    :phases {:configure (phase
-                        (zookeeper/install :version "3.3.4")
+                        (zookeeper/install :version ZK-VERSION)
                         (zookeeper/configure
                          :clientPort 2181
                          :maxClientCnxns 0)
                         (zookeeper/init))
+            :post-configure (phase
+                          (exec-script/exec-script
+                            (cd ~(str zookeeper/install-path "-" ZK-VERSION))
+                            (sh "bin/zkCli.sh create /kafka 1")
+                            ))
                         }))
 
 (def RELEASE-URL "http://people.apache.org/~nehanarkhede/kafka-0.7.0-incubating/kafka-0.7.0-incubating-src.tar.gz")
@@ -74,6 +81,7 @@
   (->> (zookeeper-ips compute name)
        (map #(str % ":2181"))
        (str/join ",")
+       (#(str % "/kafka"))    
        ))
 
 (defn kafka-server-spec [name]
@@ -165,6 +173,7 @@
   (authorize-group aws (my-region) (jclouds-group "kafka-" name) (jclouds-group "kafka-zookeeper-" name))
   (authorize-group aws (my-region) (jclouds-group "kafka-zookeeper-" name) (jclouds-group "kafka-" name))
 
+  (lift (zookeeper name) :compute aws :phase [:post-configure])  
   (lift (kafka name) :compute aws :phase [:post-configure :exec])
   (println "Provisioning Complete.")
   (print-all-ips! aws name))
